@@ -482,6 +482,29 @@ class TestLiteLLMModel:
         model = LiteLLMModel(model_id="fal/llama-3.3-70b", flatten_messages_as_text=True)
         assert model.flatten_messages_as_text
 
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_api_base_and_api_key_are_forwarded(self, stream):
+        import litellm
+
+        mock_litellm = MagicMock()
+        mock_litellm.completion.return_value = (
+            iter([])
+            if stream
+            else litellm.ModelResponse(
+                choices=[{"message": {"role": "assistant", "content": "Hi"}}],
+                usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            )
+        )
+        with patch("smolagents.models.LiteLLMModel.create_client", return_value=mock_litellm):
+            model = LiteLLMModel(model_id="openai/test-model", api_base="http://localhost:8000/v1", api_key="test_key")
+        messages = [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": "Hello"}])]
+        if stream:
+            list(model.generate_stream(messages))
+        else:
+            model.generate(messages)
+        assert mock_litellm.completion.call_args.kwargs["api_base"] == "http://localhost:8000/v1"
+        assert mock_litellm.completion.call_args.kwargs["api_key"] == "test_key"
+
 
 class TestLiteLLMRouterModel:
     @pytest.mark.parametrize(
@@ -516,6 +539,39 @@ class TestLiteLLMRouterModel:
             assert mock_router.call_args.kwargs["model_list"] == model_list
             assert mock_router.call_args.kwargs["routing_strategy"] == "simple-shuffle"
             assert router_model.client == mock_router.return_value
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_deployment_api_base_and_api_key_are_not_overridden(self, stream):
+        import litellm
+
+        model_list = [
+            {
+                "model_name": "model-group-1",
+                "litellm_params": {
+                    "model": "openai/test-model",
+                    "api_base": "http://localhost:8000/v1",
+                    "api_key": "deployment_key",
+                },
+            }
+        ]
+        model = LiteLLMRouterModel(model_id="model-group-1", model_list=model_list)
+        messages = [ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": "Hello"}])]
+        response = (
+            iter([])
+            if stream
+            else litellm.ModelResponse(
+                choices=[{"message": {"role": "assistant", "content": "Hi"}}],
+                usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            )
+        )
+        # The real Router picks the deployment and merges its litellm_params into the litellm.completion call
+        with patch("litellm.completion", return_value=response) as mock_completion:
+            if stream:
+                list(model.generate_stream(messages))
+            else:
+                model.generate(messages)
+        assert mock_completion.call_args.kwargs["api_base"] == "http://localhost:8000/v1"
+        assert mock_completion.call_args.kwargs["api_key"] == "deployment_key"
 
 
 class TestOpenAIModel:

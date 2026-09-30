@@ -1263,6 +1263,15 @@ class LiteLLMModel(ApiModel):
 
         return litellm
 
+    def _get_connection_kwargs(self) -> dict[str, str]:
+        # Only pass api_base/api_key when set: an explicit None would override the values configured elsewhere,
+        # e.g. each deployment's litellm_params when the client is a LiteLLM Router
+        return {
+            name: value
+            for name, value in (("api_base", self.api_base), ("api_key", self.api_key))
+            if value is not None
+        }
+
     def generate(
         self,
         messages: list[ChatMessage | dict],
@@ -1277,8 +1286,7 @@ class LiteLLMModel(ApiModel):
             response_format=response_format,
             tools_to_call_from=tools_to_call_from,
             model=self.model_id,
-            api_base=self.api_base,
-            api_key=self.api_key,
+            **self._get_connection_kwargs(),
             convert_images_to_image_urls=True,
             custom_role_conversions=self.custom_role_conversions,
             **kwargs,
@@ -1320,8 +1328,7 @@ class LiteLLMModel(ApiModel):
             response_format=response_format,
             tools_to_call_from=tools_to_call_from,
             model=self.model_id,
-            api_base=self.api_base,
-            api_key=self.api_key,
+            **self._get_connection_kwargs(),
             custom_role_conversions=self.custom_role_conversions,
             convert_images_to_image_urls=True,
             **kwargs,
